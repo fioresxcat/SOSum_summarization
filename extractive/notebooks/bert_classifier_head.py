@@ -1,5 +1,17 @@
+import sys
+sys.path.append('..')
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import argparse
+from tqdm import tqdm
+import numpy as np
 import torch
+import torchvision.transforms.functional as TF
+from PIL import Image
+
 from transformers import BertTokenizer, BertModel
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
@@ -9,7 +21,6 @@ from sklearn.naive_bayes import GaussianNB
 from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import f1_score, precision_score, recall_score, classification_report
 from rouge_score import rouge_scorer
-import numpy as np
 from sklearn.preprocessing import StandardScaler
 import ast
 
@@ -48,16 +59,11 @@ def preprocess_data(dataframe):
                 labels.append(1 if i in truth_indices else 0)  # Label sentences
                 embeddings.append(encode_sentence(sentence.strip()))
                 
-    return np.array(embeddings), np.array(labels)
+    return np.array(embeddings), np.array(labels), sentences
 
-# # Preprocess the data
-# X, y = preprocess_data(df)
-
-# # Split the dataset into training and testing sets
-# X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-X_train, y_train = preprocess_data(df)
-X_test, y_test = preprocess_data(val_df)
+# Preprocess the data for train and validation
+X_train, y_train, train_sentences = preprocess_data(df)
+X_test, y_test, val_sentences = preprocess_data(val_df)
 
 # Scaling features
 scaler = StandardScaler()
@@ -78,6 +84,7 @@ classifiers = {
 for name, clf in classifiers.items():
     clf.fit(X_train, y_train)
     y_pred = clf.predict(X_test)
+    
     print(f"Classifier: {name}")
     print(f"F1 Score: {f1_score(y_test, y_pred)}")
     print(f"Precision: {precision_score(y_test, y_pred)}")
@@ -100,20 +107,33 @@ def get_predicted_summary(sentences, y_pred):
 def get_true_summary(sentences, truth_indices):
     return ' '.join([sentences[i] for i in truth_indices])
 
-# Evaluate ROUGE scores for the test set
-for idx, row in df.iterrows():
-    test_sentences = row['answer_body'].split('.')
-    truth_indices = row['truth']
+# Function to calculate and display precision, recall, F1, ROUGE scores for a dataset
+def evaluate_with_rouge(dataset, classifier, dataset_name):
+    print(f"Evaluating {dataset_name} set with {classifier}")
+    X_data, y_data, sentences = preprocess_data(dataset)
+    y_pred = classifier.predict(scaler.transform(X_data))
     
-    # Use one of the classifiers (e.g., Logistic Regression)
-    y_pred = classifiers['MLP Classifier'].predict(scaler.transform([encode_sentence(s) for s in test_sentences if s.strip()]))
-
-    pred_summary = get_predicted_summary(test_sentences, y_pred)
-    true_summary = get_true_summary(test_sentences, truth_indices)
+    # Classification metrics
+    f1 = f1_score(y_data, y_pred)
+    precision = precision_score(y_data, y_pred)
+    recall = recall_score(y_data, y_pred)
+    
+    print(f"{dataset_name} Set Results")
+    print(f"F1 Score: {f1}")
+    print(f"Precision: {precision}")
+    print(f"Recall: {recall}")
+    
+    # ROUGE metrics
+    pred_summary = get_predicted_summary(sentences, y_pred)
+    true_summary = get_true_summary(sentences, dataset['truth'][0])  # Assuming 1 row per dataset for simplicity
     
     rouge_scores = calculate_rouge_scores(pred_summary, true_summary)
-    print(f"ROUGE Scores for Answer ID {row['answer_id']}:")
+    
     print(f"ROUGE-1: {rouge_scores['rouge1'].fmeasure}")
     print(f"ROUGE-2: {rouge_scores['rouge2'].fmeasure}")
     print(f"ROUGE-L: {rouge_scores['rougeL'].fmeasure}")
     print("-" * 50)
+
+# Run evaluation for train and test set
+evaluate_with_rouge(df, classifiers['MLP Classifier'], "Train")
+evaluate_with_rouge(val_df, classifiers['MLP Classifier'], "Validation")
