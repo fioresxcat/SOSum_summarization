@@ -53,7 +53,7 @@ data
 *.csv
 *.ckpt*
 *.tfevents.*
-*.ipynb*
+#*.ipynb*
 draft
 
 # Log files
